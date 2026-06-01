@@ -1,0 +1,25 @@
+{
+  // Run & Debug configs. Pick one from the dropdown in the Run panel (F5).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Build Star Wars Spreadsheet",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "Build Spreadsheet (verbose)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["--verbose"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    }
+  ]
+}

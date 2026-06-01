@@ -1,0 +1,6 @@
+{
+  // Use the project virtual environment for running and debugging.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.terminal.activateEnvironment": true
+}

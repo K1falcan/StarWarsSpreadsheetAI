@@ -14,8 +14,17 @@ log = logging.getLogger(__name__)
  
 # ---- styling -----------------------------------------------------------------
  
+# Font sizes bumped up a notch from openpyxl's default of 11 for readability.
+BODY_FONT_SIZE = 13
+HEADER_FONT_SIZE = 14
+
 HEADER_FILL = PatternFill("solid", fgColor="1F2A44")  # deep Star Wars navy
-HEADER_FONT = Font(bold=True, color="FFE81F")          # the iconic yellow
+HEADER_FONT = Font(bold=True, color="FFE81F", size=HEADER_FONT_SIZE)  # the iconic yellow
+BODY_FONT = Font(size=BODY_FONT_SIZE)
+# Rows for the "important" entities (main characters, most-used ships, most-shown
+# planets) get this blue fill. Light enough that the black body text stays legible.
+HIGHLIGHT_FILL = PatternFill("solid", fgColor="9DC3E6")
+HIGHLIGHT_FONT = Font(size=BODY_FONT_SIZE, bold=True)
 THIN = Side(style="thin", color="D0D0D0")
 CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 WRAP_TOP = Alignment(vertical="top", wrap_text=True)
@@ -23,6 +32,18 @@ HEADER_ALIGN = Alignment(vertical="center", horizontal="center", wrap_text=True)
  
 MAX_COL_WIDTH = 60
 MIN_COL_WIDTH = 12
+
+# "Important" rows are highlighted when an entity appears in at least this many
+# films. Thresholds differ per sheet because the distributions differ (films
+# total only 6) and were chosen at the natural break in each distribution.
+MAIN_CHARACTER_MIN_FILMS = 4  # -> 9 saga leads (Luke, Leia, Vader, Yoda, ...)
+TOP_STARSHIP_MIN_FILMS = 3    # -> the 6 most-used ships (X-wing, Falcon, ...)
+TOP_PLANET_MIN_FILMS = 3      # -> the 4 most-shown worlds (Tatooine, Naboo, ...)
+
+
+def _films_at_least(minimum: int) -> Callable[[Dict[str, Any]], bool]:
+    """Predicate: record appears in at least ``minimum`` films."""
+    return lambda record: len(record.get("films", [])) >= minimum
  
  
 class Column(NamedTuple):
@@ -147,8 +168,13 @@ def _write_sheet(
     columns: List[Column],
     records: List[Dict[str, Any]],
     client: SwapiClient,
+    highlight: Callable[[Dict[str, Any]], bool] | None = None,
 ) -> None:
-    """Write a header row plus one row per record, then style the sheet."""
+    """Write a header row plus one row per record, then style the sheet.
+
+    ``highlight`` is an optional predicate; rows whose record satisfies it get
+    the blue highlight fill (main characters / most-used ships / most-shown planets).
+    """
     headers = [c.header for c in columns]
     ws.append(headers)
     for cell in ws[1]:
@@ -160,15 +186,27 @@ def _write_sheet(
     for record in records:
         ws.append([col.value(record, client) for col in columns])
  
-    _style_body(ws, len(columns), len(records))
+    highlighted = [bool(highlight(r)) for r in records] if highlight else None
+    _style_body(ws, len(columns), len(records), highlighted)
  
  
-def _style_body(ws: Worksheet, n_cols: int, n_rows: int) -> None:
-    """Apply borders/wrapping, freeze the header, add a filter, size columns."""
-    for row in ws.iter_rows(min_row=2, max_row=n_rows + 1, max_col=n_cols):
+def _style_body(
+    ws: Worksheet,
+    n_cols: int,
+    n_rows: int,
+    highlighted: List[bool] | None = None,
+) -> None:
+    """Apply font/borders/wrapping, freeze the header, add a filter, size columns."""
+    for offset, row in enumerate(ws.iter_rows(min_row=2, max_row=n_rows + 1, max_col=n_cols)):
+        is_highlighted = bool(highlighted[offset]) if highlighted else False
         for cell in row:
             cell.alignment = WRAP_TOP
             cell.border = CELL_BORDER
+            if is_highlighted:
+                cell.fill = HIGHLIGHT_FILL
+                cell.font = HIGHLIGHT_FONT
+            else:
+                cell.font = BODY_FONT
  
     ws.freeze_panes = "A2"
     if n_rows:
@@ -199,19 +237,21 @@ def build_workbook(client: SwapiClient, data: Dict[str, List[Dict[str, Any]]]) -
         """Sort records alphabetically by their 'name' field (case-insensitive)."""
         return sorted(records, key=lambda r: r.get("name", "").lower())
  
+    # (title, columns, records, highlight-predicate-or-None). The predicate marks
+    # the "important" rows that get the blue highlight.
     sheets = [
-        ("Characters", CHARACTER_COLUMNS, alpha(data["people"])),
-        ("Planets", PLANET_COLUMNS, alpha(data["planets"])),
-        ("Species", SPECIES_COLUMNS, alpha(data["species"])),
-        ("Starships", STARSHIP_COLUMNS, alpha(data["starships"])),
-        ("Vehicles", VEHICLE_COLUMNS, alpha(data["vehicles"])),
-        ("Films (Chronological)", FILM_COLUMNS, chronological),
-        ("Films (Release Order)", FILM_COLUMNS, by_release),
+        ("Characters", CHARACTER_COLUMNS, alpha(data["people"]), _films_at_least(MAIN_CHARACTER_MIN_FILMS)),
+        ("Planets", PLANET_COLUMNS, alpha(data["planets"]), _films_at_least(TOP_PLANET_MIN_FILMS)),
+        ("Species", SPECIES_COLUMNS, alpha(data["species"]), None),
+        ("Starships", STARSHIP_COLUMNS, alpha(data["starships"]), _films_at_least(TOP_STARSHIP_MIN_FILMS)),
+        ("Vehicles", VEHICLE_COLUMNS, alpha(data["vehicles"]), None),
+        ("Films (Chronological)", FILM_COLUMNS, chronological, None),
+        ("Films (Release Order)", FILM_COLUMNS, by_release, None),
     ]
  
-    for title, columns, records in sheets:
+    for title, columns, records, highlight in sheets:
         ws = wb.create_sheet(title=title)
-        _write_sheet(ws, columns, records, client)
+        _write_sheet(ws, columns, records, client, highlight)
         log.info("Wrote sheet %r with %d rows", title, len(records))
  
     return wb
